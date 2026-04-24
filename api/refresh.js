@@ -8,23 +8,22 @@ const supabase = createClient(
 // ── Exchange fetchers ────────────────────────────────────────────────────────
 
 async function fetchBinance() {
-  // Try multiple endpoints — Binance blocks some cloud provider IPs
+  // ticker/price is much smaller than exchangeInfo, less likely to be blocked
   const hosts = [
     'https://api.binance.com',
     'https://api1.binance.com',
     'https://api2.binance.com',
-    'https://api3.binance.com',
-    'https://api4.binance.com',
+    'https://data.binance.com',
   ]
   for (const host of hosts) {
     try {
-      const res  = await fetch(`${host}/api/v3/exchangeInfo`, { signal: AbortSignal.timeout(10000) })
+      const res = await fetch(`${host}/api/v3/ticker/price`, { signal: AbortSignal.timeout(8000) })
       if (!res.ok) continue
       const data = await res.json()
       const coins = new Set()
-      for (const s of data.symbols) {
-        if (s.status === 'TRADING' && s.quoteAsset === 'USDT') {
-          coins.add(s.baseAsset.toUpperCase())
+      for (const item of data) {
+        if (item.symbol.endsWith('USDT')) {
+          coins.add(item.symbol.slice(0, -4))
         }
       }
       if (coins.size > 0) return [...coins]
@@ -69,21 +68,28 @@ async function fetchOKX() {
 }
 
 async function fetchBybit() {
-  // Bybit paginates — loop until no nextPageCursor
-  const coins  = new Set()
-  let cursor   = ''
-  let attempts = 0
-  while (attempts++ < 10) {
-    const url = `https://api.bybit.com/v5/market/instruments-info?category=spot&limit=500${cursor ? '&cursor=' + cursor : ''}`
-    const res  = await fetch(url, { signal: AbortSignal.timeout(10000) })
-    const data = await res.json()
-    for (const inst of data.result?.list ?? []) {
-      coins.add(inst.baseCoin.toUpperCase())
+  // tickers endpoint returns all in one call, no pagination needed
+  const hosts = [
+    'https://api.bybit.com',
+    'https://api.bytick.com',
+  ]
+  for (const host of hosts) {
+    try {
+      const res  = await fetch(`${host}/v5/market/tickers?category=spot`, { signal: AbortSignal.timeout(8000) })
+      if (!res.ok) continue
+      const data = await res.json()
+      const coins = new Set()
+      for (const t of data.result?.list ?? []) {
+        if (t.symbol.endsWith('USDT')) {
+          coins.add(t.symbol.slice(0, -4))
+        }
+      }
+      if (coins.size > 0) return [...coins]
+    } catch (e) {
+      console.error(`Bybit ${host} failed:`, e.message)
     }
-    cursor = data.result?.nextPageCursor ?? ''
-    if (!cursor) break
   }
-  return [...coins]
+  return []
 }
 
 async function fetchKucoin() {
