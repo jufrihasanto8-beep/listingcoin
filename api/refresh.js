@@ -111,7 +111,7 @@ export default async function handler(req, res) {
         const coins = await fn()
         counts[exchange] = coins.length
         for (const symbol of coins) {
-          rows.push({ exchange, symbol, updated_at: now })
+          rows.push({ exchange, symbol, first_seen: now, updated_at: now })
         }
       } catch (err) {
         console.error(`[${exchange}]`, err.message)
