@@ -14,6 +14,8 @@
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #1e2030; }
     ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    .tab-active { border-bottom: 2px solid #3b82f6; color: #fff; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #6b7280; }
   </style>
 </head>
 <body class="text-gray-100 min-h-screen">
@@ -22,221 +24,298 @@
   <div class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
     <div>
       <h1 class="text-xl font-bold text-white">Crypto Listing Tracker</h1>
-      <p class="text-xs text-gray-500 mt-0.5">Binance coins not yet listed on other exchanges</p>
+      <p class="text-xs text-gray-500 mt-0.5">Binance coins vs other exchanges</p>
     </div>
     <div class="flex items-center gap-3">
       <span id="last-updated" class="text-xs text-gray-500"></span>
-      <button id="btn-refresh"
-        onclick="loadData(true)"
+      <button id="btn-refresh" onclick="refreshData()"
         class="text-xs px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition">
         ↻ Refresh
       </button>
     </div>
   </div>
 
-  <!-- Filters -->
-  <div class="px-6 py-3 border-b border-gray-800 flex flex-wrap gap-3 items-center">
-    <input id="search" type="text" placeholder="Search coin…"
-      oninput="applyFilters()"
-      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-40 focus:outline-none focus:border-blue-500" />
-
-    <select id="filter-exchange" onchange="applyFilters()"
-      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
-      <option value="">All exchanges</option>
-    </select>
-
-    <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer select-none">
-      <input id="only-missing" type="checkbox" onchange="applyFilters()"
-        class="w-4 h-4 accent-blue-500 cursor-pointer" />
-      Only show coins NOT listed on selected exchange
-    </label>
-
-    <span id="count-label" class="ml-auto text-xs text-gray-500"></span>
+  <!-- Tabs -->
+  <div class="flex gap-6 px-6 border-b border-gray-800">
+    <button onclick="showTab('listings')" id="tab-listings"
+      class="tab-active py-3 text-sm font-medium transition">
+      Listings
+    </button>
+    <button onclick="showTab('analytics')" id="tab-analytics"
+      class="tab-inactive py-3 text-sm font-medium transition">
+      Analytics
+    </button>
   </div>
 
-  <!-- Table -->
-  <div class="overflow-auto" style="max-height: calc(100vh - 160px);">
-    <table class="w-full text-sm border-collapse">
-      <thead id="table-head" class="bg-gray-900 text-gray-400 text-xs uppercase tracking-wider">
-        <tr>
-          <th class="text-left px-4 py-3 font-semibold bg-gray-900 cursor-pointer" onclick="sortBy('symbol')">
-            Coin <span id="sort-symbol"></span>
-          </th>
-        </tr>
-      </thead>
-      <tbody id="table-body">
-        <tr>
-          <td colspan="10" class="text-center py-20 text-gray-500">Loading…</td>
-        </tr>
-      </tbody>
-    </table>
+  <!-- ── LISTINGS TAB ───────────────────────────────────────────────────── -->
+  <div id="page-listings">
+    <!-- Filters -->
+    <div class="px-6 py-3 border-b border-gray-800 flex flex-wrap gap-3 items-center">
+      <input id="search" type="text" placeholder="Search coin…" oninput="applyFilters()"
+        class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-40 focus:outline-none focus:border-blue-500" />
+      <select id="filter-exchange" onchange="applyFilters()"
+        class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+        <option value="">All exchanges</option>
+      </select>
+      <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer select-none">
+        <input id="only-missing" type="checkbox" onchange="applyFilters()" class="w-4 h-4 accent-blue-500 cursor-pointer" />
+        Only NOT listed on selected exchange
+      </label>
+      <span id="count-label" class="ml-auto text-xs text-gray-500"></span>
+    </div>
+
+    <div class="overflow-auto" style="max-height: calc(100vh - 200px);">
+      <table class="w-full text-sm border-collapse">
+        <thead id="table-head" class="bg-gray-900 text-gray-400 text-xs uppercase tracking-wider">
+          <tr><th class="text-left px-4 py-3 font-semibold bg-gray-900">Coin</th></tr>
+        </thead>
+        <tbody id="table-body">
+          <tr><td colspan="10" class="text-center py-20 text-gray-500">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── ANALYTICS TAB ─────────────────────────────────────────────────── -->
+  <div id="page-analytics" class="hidden px-6 py-6 space-y-8">
+    <div id="analytics-notice" class="text-xs text-yellow-400 bg-yellow-900/30 border border-yellow-800 rounded px-4 py-2 hidden">
+      Data analitik akan semakin akurat seiring waktu — interval listing dihitung sejak pertama kali koin terdeteksi di tiap exchange.
+    </div>
+    <div id="analytics-body" class="text-gray-500 text-center py-20">Loading analytics…</div>
   </div>
 
   <script>
     let allCoins    = []
     let exchanges   = []
-    let sortKey     = 'missing'
-    let sortDir     = -1  // -1 = desc, 1 = asc
     let lastUpdated = null
+    let sortKey     = 'missing'
+    let sortDir     = -1
+    let currentTab  = 'listings'
 
-    const LABELS = {
-      upbit:   'Upbit',
-      bithumb: 'Bithumb',
-      okx:     'OKX',
-      bybit:   'Bybit',
-      kucoin:  'KuCoin',
+    const LABELS = { upbit: 'Upbit', bithumb: 'Bithumb', okx: 'OKX', bybit: 'Bybit', kucoin: 'KuCoin' }
+
+    // ── Tabs ────────────────────────────────────────────────────────────────
+    function showTab(tab) {
+      currentTab = tab
+      document.getElementById('page-listings').classList.toggle('hidden', tab !== 'listings')
+      document.getElementById('page-analytics').classList.toggle('hidden', tab !== 'analytics')
+      document.getElementById('tab-listings').className  = tab === 'listings'  ? 'tab-active py-3 text-sm font-medium transition'  : 'tab-inactive py-3 text-sm font-medium transition'
+      document.getElementById('tab-analytics').className = tab === 'analytics' ? 'tab-active py-3 text-sm font-medium transition' : 'tab-inactive py-3 text-sm font-medium transition'
+      if (tab === 'analytics') loadAnalytics()
     }
 
-    // ── Load data ──────────────────────────────────────────────────────────
-
-    async function loadData(force = false) {
-      const btn = document.getElementById('btn-refresh')
-      btn.textContent = '↻ Loading…'
-      btn.disabled = true
-
+    // ── Load listings ────────────────────────────────────────────────────────
+    async function loadData() {
       try {
-        const url = force ? '/api/coins?bust=' + Date.now() : '/api/coins'
-        const res  = await fetch(url)
+        const res  = await fetch('/api/coins')
         const json = await res.json()
-
-        if (json.error) { alert('Error: ' + json.error); return }
-
+        if (json.error) { showError(json.error); return }
         allCoins    = json.coins    ?? []
         exchanges   = json.exchanges ?? []
         lastUpdated = json.lastUpdated
-
         buildHeader()
         buildExchangeFilter()
         applyFilters()
         updateLastUpdated()
       } catch (e) {
-        document.getElementById('table-body').innerHTML =
-          `<tr><td colspan="10" class="text-center py-20 text-red-400">Failed to load: ${e.message}</td></tr>`
-      } finally {
-        btn.textContent = '↻ Refresh'
-        btn.disabled = false
+        showError(e.message)
       }
     }
 
-    // ── Build header ──────────────────────────────────────────────────────
+    function showError(msg) {
+      document.getElementById('table-body').innerHTML =
+        `<tr><td colspan="10" class="text-center py-20 text-red-400">Error: ${msg}</td></tr>`
+    }
 
+    async function refreshData() {
+      const btn = document.getElementById('btn-refresh')
+      btn.textContent = '↻ Loading…'; btn.disabled = true
+      await loadData()
+      if (currentTab === 'analytics') loadAnalytics()
+      btn.textContent = '↻ Refresh'; btn.disabled = false
+    }
+
+    // ── Listings table ───────────────────────────────────────────────────────
     function buildHeader() {
-      const tr = document.querySelector('#table-head tr')
-      tr.innerHTML = `
+      document.querySelector('#table-head tr').innerHTML = `
         <th class="text-left px-4 py-3 font-semibold bg-gray-900 cursor-pointer whitespace-nowrap" onclick="sortBy('symbol')">
           Coin <span id="sort-symbol" class="text-blue-400"></span>
         </th>
         ${exchanges.map(ex => `
           <th class="text-center px-3 py-3 font-semibold bg-gray-900 cursor-pointer whitespace-nowrap" onclick="sortBy('${ex}')">
-            ${LABELS[ex] ?? ex} <span id="sort-${ex}" class="text-blue-400"></span>
-          </th>
-        `).join('')}
+            ${LABELS[ex]??ex} <span id="sort-${ex}" class="text-blue-400"></span>
+          </th>`).join('')}
         <th class="text-center px-3 py-3 font-semibold bg-gray-900 cursor-pointer whitespace-nowrap" onclick="sortBy('missing')">
           Missing <span id="sort-missing" class="text-blue-400">↓</span>
-        </th>
-      `
+        </th>`
     }
-
-    // ── Build exchange filter select ──────────────────────────────────────
 
     function buildExchangeFilter() {
-      const sel = document.getElementById('filter-exchange')
-      sel.innerHTML = '<option value="">All exchanges</option>' +
-        exchanges.map(ex => `<option value="${ex}">${LABELS[ex] ?? ex}</option>`).join('')
+      document.getElementById('filter-exchange').innerHTML =
+        '<option value="">All exchanges</option>' +
+        exchanges.map(ex => `<option value="${ex}">${LABELS[ex]??ex}</option>`).join('')
     }
-
-    // ── Filters & sort ────────────────────────────────────────────────────
 
     function applyFilters() {
       const search   = document.getElementById('search').value.trim().toUpperCase()
       const filterEx = document.getElementById('filter-exchange').value
       const onlyMiss = document.getElementById('only-missing').checked
-
       let filtered = allCoins.filter(c => {
         if (search && !c.symbol.includes(search)) return false
         if (filterEx && onlyMiss && c[filterEx] === true) return false
         return true
       })
-
       filtered = sortCoins(filtered)
       renderTable(filtered)
-      document.getElementById('count-label').textContent =
-        `${filtered.length} / ${allCoins.length} coins`
+      document.getElementById('count-label').textContent = `${filtered.length} / ${allCoins.length} coins`
     }
 
     function sortCoins(list) {
       return [...list].sort((a, b) => {
         let va = a[sortKey], vb = b[sortKey]
-        if (typeof va === 'boolean') { va = va ? 1 : 0; vb = vb ? 1 : 0 }
-        if (typeof va === 'string')  return sortDir * va.localeCompare(vb)
-        return sortDir * ((vb ?? 0) - (va ?? 0))
+        if (typeof va === 'boolean') { va = va?1:0; vb = vb?1:0 }
+        if (typeof va === 'string') return sortDir * va.localeCompare(vb)
+        return sortDir * ((vb??0) - (va??0))
       })
     }
 
     function sortBy(key) {
       if (sortKey === key) sortDir *= -1
       else { sortKey = key; sortDir = key === 'symbol' ? 1 : -1 }
-      updateSortIndicators()
-      applyFilters()
-    }
-
-    function updateSortIndicators() {
       document.querySelectorAll('[id^="sort-"]').forEach(el => el.textContent = '')
       const el = document.getElementById('sort-' + sortKey)
       if (el) el.textContent = sortDir === 1 ? '↑' : '↓'
+      applyFilters()
     }
 
-    // ── Render table ──────────────────────────────────────────────────────
-
     function renderTable(coins) {
-      const tbody = document.getElementById('table-body')
+      const filterEx = document.getElementById('filter-exchange').value
       if (!coins.length) {
-        tbody.innerHTML = `<tr><td colspan="10" class="text-center py-20 text-gray-500">No coins match your filter.</td></tr>`
+        document.getElementById('table-body').innerHTML =
+          `<tr><td colspan="10" class="text-center py-20 text-gray-500">No coins match.</td></tr>`
         return
       }
-
-      const filterEx = document.getElementById('filter-exchange').value
-
-      tbody.innerHTML = coins.map(c => `
+      document.getElementById('table-body').innerHTML = coins.map(c => `
         <tr class="border-t border-gray-800 transition-colors">
           <td class="px-4 py-2.5 font-mono font-semibold text-white">${c.symbol}</td>
           ${exchanges.map(ex => {
             const listed = c[ex]
-            const highlight = filterEx === ex && !listed
+            const hl = filterEx === ex && !listed
             return `<td class="px-3 py-2.5 text-center">
-              <span class="inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                listed
-                  ? 'badge-yes'
-                  : highlight ? 'bg-red-900 text-red-300 ring-1 ring-red-500' : 'badge-no'
-              }">
+              <span class="inline-block px-2 py-0.5 rounded text-xs font-medium ${listed ? 'badge-yes' : hl ? 'bg-red-900 text-red-300 ring-1 ring-red-500' : 'badge-no'}">
                 ${listed ? '✓' : '✗'}
-              </span>
-            </td>`
+              </span></td>`
           }).join('')}
           <td class="px-3 py-2.5 text-center">
-            <span class="inline-block px-2 py-0.5 rounded text-xs font-bold ${
-              c.missing === 0 ? 'text-gray-500' :
-              c.missing >= 4 ? 'bg-red-900 text-red-300' :
-              c.missing >= 2 ? 'bg-yellow-900 text-yellow-300' :
-                               'bg-blue-900 text-blue-300'
-            }">
+            <span class="inline-block px-2 py-0.5 rounded text-xs font-bold ${c.missing===0?'text-gray-500':c.missing>=4?'bg-red-900 text-red-300':c.missing>=2?'bg-yellow-900 text-yellow-300':'bg-blue-900 text-blue-300'}">
               ${c.missing}
             </span>
           </td>
-        </tr>
-      `).join('')
+        </tr>`).join('')
     }
-
-    // ── Last updated ──────────────────────────────────────────────────────
 
     function updateLastUpdated() {
       const el = document.getElementById('last-updated')
-      if (!lastUpdated) { el.textContent = 'No data yet — click Refresh'; return }
-      const d = new Date(lastUpdated)
-      el.textContent = 'Updated ' + d.toLocaleString()
+      if (!lastUpdated) { el.textContent = 'No data'; return }
+      el.textContent = 'Updated ' + new Date(lastUpdated).toLocaleString()
     }
 
-    // ── Init ──────────────────────────────────────────────────────────────
+    // ── Analytics ────────────────────────────────────────────────────────────
+    async function loadAnalytics() {
+      const body = document.getElementById('analytics-body')
+      body.innerHTML = '<div class="text-center py-20 text-gray-500">Loading…</div>'
+      try {
+        const res  = await fetch('/api/analytics')
+        const json = await res.json()
+        if (json.error) { body.innerHTML = `<p class="text-red-400">${json.error}</p>`; return }
+        renderAnalytics(json)
+      } catch (e) {
+        body.innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`
+      }
+    }
+
+    function renderAnalytics({ stats, trackedSince }) {
+      const notice = document.getElementById('analytics-notice')
+      notice.classList.remove('hidden')
+      if (trackedSince) {
+        notice.textContent = `Tracking since ${new Date(trackedSince).toLocaleDateString()} — analitik makin akurat seiring waktu.`
+      }
+
+      const OTHERS = ['upbit', 'bithumb', 'okx', 'bybit', 'kucoin']
+      const body = document.getElementById('analytics-body')
+
+      body.innerHTML = OTHERS.map(ex => {
+        const s = stats[ex]
+        if (!s) return ''
+        const bucketBar = (label, count, total) => {
+          const pct = total ? Math.round((count/total)*100) : 0
+          return `<div class="flex items-center gap-2 text-xs">
+            <span class="w-14 text-gray-400">${label}</span>
+            <div class="flex-1 bg-gray-800 rounded h-2">
+              <div class="bg-blue-500 h-2 rounded" style="width:${pct}%"></div>
+            </div>
+            <span class="w-12 text-right text-gray-400">${count} (${pct}%)</span>
+          </div>`
+        }
+
+        return `
+        <div class="border border-gray-800 rounded-xl p-5">
+          <h2 class="text-lg font-bold text-white mb-4">${s.label}</h2>
+
+          <!-- Stat cards -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+            ${card('Coverage', s.coveragePct + '%', 'dari koin Binance')}
+            ${card('Rata-rata listing', s.avgDays !== null ? s.avgDays + ' hari' : '–', 'setelah Binance')}
+            ${card('Sudah listing', s.alreadyListed + s.listedAfterCount, 'dari ' + s.totalBinance + ' koin')}
+            ${card('Belum listing', s.notListed, 'koin Binance')}
+          </div>
+
+          <!-- Distribution -->
+          ${s.listedAfterCount > 0 ? `
+          <div class="mb-5">
+            <p class="text-xs text-gray-400 mb-2 font-medium">Distribusi waktu listing setelah Binance</p>
+            <div class="space-y-1.5">
+              ${bucketBar('0–7 hari', s.buckets['0-7d'],   s.listedAfterCount)}
+              ${bucketBar('7–30 hr', s.buckets['7-30d'],  s.listedAfterCount)}
+              ${bucketBar('30–90 hr', s.buckets['30-90d'], s.listedAfterCount)}
+              ${bucketBar('90+ hr',   s.buckets['90d+'],   s.listedAfterCount)}
+            </div>
+          </div>` : ''}
+
+          <!-- Fastest & Slowest -->
+          ${s.fastest.length > 0 ? `
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <p class="text-xs font-medium text-gray-400 mb-2">Tercepat listing di ${s.label}</p>
+              ${coinList(s.fastest)}
+            </div>
+            <div>
+              <p class="text-xs font-medium text-gray-400 mb-2">Terlama listing di ${s.label}</p>
+              ${coinList(s.slowest)}
+            </div>
+          </div>` : '<p class="text-xs text-gray-600">Belum cukup data historis. Data akan muncul setelah beberapa hari tracking.</p>'}
+        </div>`
+      }).join('')
+    }
+
+    function card(title, value, sub) {
+      return `<div class="bg-gray-800 rounded-lg p-3">
+        <p class="text-xs text-gray-400">${title}</p>
+        <p class="text-xl font-bold text-white mt-0.5">${value}</p>
+        <p class="text-xs text-gray-500">${sub}</p>
+      </div>`
+    }
+
+    function coinList(items) {
+      return `<div class="space-y-1">
+        ${items.map(p => `<div class="flex justify-between text-xs">
+          <span class="font-mono text-white">${p.symbol}</span>
+          <span class="text-gray-400">${p.days} hari</span>
+        </div>`).join('')}
+      </div>`
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
     loadData()
   </script>
 </body>
