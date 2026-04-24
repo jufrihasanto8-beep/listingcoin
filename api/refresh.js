@@ -5,34 +5,33 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 )
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+async function fetchCoinGeckoExchange(exchangeId) {
+  // Fetch 5 pages in parallel (500 tickers) — covers all USDT pairs on major exchanges
+  const coins = new Set()
+  const pages = await Promise.allSettled(
+    [1, 2, 3, 4, 5].map(page =>
+      fetch(`https://api.coingecko.com/api/v3/exchanges/${exchangeId}/tickers?page=${page}`, {
+        signal: AbortSignal.timeout(8000)
+      }).then(r => r.json())
+    )
+  )
+  for (const result of pages) {
+    if (result.status !== 'fulfilled') continue
+    for (const t of result.value.tickers ?? []) {
+      if (t.target === 'USDT') coins.add(t.base.toUpperCase())
+    }
+  }
+  return [...coins]
+}
+
 // ── Exchange fetchers ────────────────────────────────────────────────────────
 
 async function fetchBinance() {
-  // ticker/price is much smaller than exchangeInfo, less likely to be blocked
-  const hosts = [
-    'https://api.binance.com',
-    'https://api1.binance.com',
-    'https://api2.binance.com',
-    'https://data.binance.com',
-  ]
-  for (const host of hosts) {
-    try {
-      const res = await fetch(`${host}/api/v3/ticker/price`, { signal: AbortSignal.timeout(8000) })
-      if (!res.ok) continue
-      const data = await res.json()
-      const coins = new Set()
-      for (const item of data) {
-        if (item.symbol.endsWith('USDT')) {
-          coins.add(item.symbol.slice(0, -4))
-        }
-      }
-      if (coins.size > 0) return [...coins]
-    } catch (e) {
-      console.error(`Binance ${host} failed:`, e.message)
-    }
-  }
-  return []
+  return fetchCoinGeckoExchange('binance')
 }
+
 
 async function fetchUpbit() {
   const res = await fetch('https://api.upbit.com/v1/market/all', {
@@ -68,29 +67,9 @@ async function fetchOKX() {
 }
 
 async function fetchBybit() {
-  // tickers endpoint returns all in one call, no pagination needed
-  const hosts = [
-    'https://api.bybit.com',
-    'https://api.bytick.com',
-  ]
-  for (const host of hosts) {
-    try {
-      const res  = await fetch(`${host}/v5/market/tickers?category=spot`, { signal: AbortSignal.timeout(8000) })
-      if (!res.ok) continue
-      const data = await res.json()
-      const coins = new Set()
-      for (const t of data.result?.list ?? []) {
-        if (t.symbol.endsWith('USDT')) {
-          coins.add(t.symbol.slice(0, -4))
-        }
-      }
-      if (coins.size > 0) return [...coins]
-    } catch (e) {
-      console.error(`Bybit ${host} failed:`, e.message)
-    }
-  }
-  return []
+  return fetchCoinGeckoExchange('bybit_spot')
 }
+
 
 async function fetchKucoin() {
   const res = await fetch('https://api.kucoin.com/api/v1/symbols')
