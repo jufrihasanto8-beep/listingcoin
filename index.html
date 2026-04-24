@@ -45,6 +45,10 @@
       class="tab-inactive py-3 text-sm font-medium transition">
       🔔 Alerts
     </button>
+    <button onclick="showTab('predict')" id="tab-predict"
+      class="tab-inactive py-3 text-sm font-medium transition">
+      🎯 Predictions
+    </button>
     <button onclick="showTab('analytics')" id="tab-analytics"
       class="tab-inactive py-3 text-sm font-medium transition">
       Analytics
@@ -80,6 +84,53 @@
     </div>
   </div>
 
+  <!-- ── PREDICTIONS TAB ─────────────────────────────────────────────── -->
+  <div id="page-predict" class="hidden px-6 py-6">
+
+    <!-- Seed panel -->
+    <div id="seed-panel" class="border border-gray-700 rounded-xl p-4 mb-6 bg-gray-900">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <p class="text-sm font-semibold text-white">Seed Data Historis</p>
+          <p class="text-xs text-gray-400 mt-0.5">Ambil tanggal listing Binance dari CoinGecko agar prediksi akurat</p>
+        </div>
+        <button id="btn-seed" onclick="startSeed()"
+          class="text-xs px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium transition">
+          Mulai Seed
+        </button>
+      </div>
+      <div id="seed-progress-bar" class="hidden">
+        <div class="w-full bg-gray-800 rounded-full h-2 mb-1">
+          <div id="seed-bar" class="bg-blue-500 h-2 rounded-full transition-all" style="width:0%"></div>
+        </div>
+        <p id="seed-status" class="text-xs text-gray-400"></p>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div id="predict-stats" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 hidden">
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-3">
+        <p class="text-xs text-gray-400">Avg Binance → Upbit</p>
+        <p id="stat-avg-upbit" class="text-xl font-bold text-white mt-0.5">– hari</p>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-3">
+        <p class="text-xs text-gray-400">Avg Binance → Bithumb</p>
+        <p id="stat-avg-bithumb" class="text-xl font-bold text-white mt-0.5">– hari</p>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-3">
+        <p class="text-xs text-gray-400">Kandidat Upbit</p>
+        <p id="stat-cand-upbit" class="text-xl font-bold text-white mt-0.5">–</p>
+      </div>
+      <div class="bg-gray-900 border border-gray-800 rounded-lg p-3">
+        <p class="text-xs text-gray-400">Kandidat Bithumb</p>
+        <p id="stat-cand-bithumb" class="text-xl font-bold text-white mt-0.5">–</p>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div id="predict-body" class="text-gray-500 text-center py-10">Klik tab ini untuk load prediksi.</div>
+  </div>
+
   <!-- ── ALERTS TAB ───────────────────────────────────────────────────── -->
   <div id="page-alerts" class="hidden px-6 py-6">
     <div class="flex items-center justify-between mb-4">
@@ -110,7 +161,7 @@
     const LABELS = { upbit: 'Upbit', bithumb: 'Bithumb', okx: 'OKX', bybit: 'Bybit', kucoin: 'KuCoin' }
 
     // ── Tabs ────────────────────────────────────────────────────────────────
-    const TABS = ['listings', 'alerts', 'analytics']
+    const TABS = ['listings', 'predict', 'alerts', 'analytics']
     function showTab(tab) {
       currentTab = tab
       for (const t of TABS) {
@@ -120,6 +171,7 @@
       }
       if (tab === 'analytics') loadAnalytics()
       if (tab === 'alerts')    loadAlerts()
+      if (tab === 'predict')   loadPredict()
     }
 
     // ── Load listings ────────────────────────────────────────────────────────
@@ -331,6 +383,120 @@
           <span class="text-gray-400">${p.days} hari</span>
         </div>`).join('')}
       </div>`
+    }
+
+    // ── Predictions ──────────────────────────────────────────────────────────
+
+    let seedRunning = false
+
+    async function startSeed() {
+      if (seedRunning) return
+      seedRunning = true
+      const btn = document.getElementById('btn-seed')
+      btn.textContent = 'Sedang berjalan…'; btn.disabled = true
+      document.getElementById('seed-progress-bar').classList.remove('hidden')
+
+      let offset = 0
+      let done   = false
+
+      while (!done) {
+        try {
+          const res  = await fetch(`/api/seed?secret=${encodeURIComponent(CRON_SECRET)}&offset=${offset}`)
+          const json = await res.json()
+          done   = json.done
+          offset = json.nextOffset ?? offset
+
+          const remaining = json.remaining ?? 0
+          const total     = offset + remaining
+          const pct       = total > 0 ? Math.round((offset / total) * 100) : 100
+          document.getElementById('seed-bar').style.width = pct + '%'
+          document.getElementById('seed-status').textContent =
+            done ? '✅ Selesai! Reload predictions.' : `Memproses… ${offset}/${total} coin`
+
+          if (!done) await new Promise(r => setTimeout(r, 15000)) // 15 detik jeda (CG rate limit)
+        } catch (e) {
+          document.getElementById('seed-status').textContent = 'Error: ' + e.message
+          break
+        }
+      }
+
+      btn.textContent = 'Seed ulang'; btn.disabled = false
+      seedRunning = false
+      if (done) loadPredict()
+    }
+
+    // CRON_SECRET harus diisi manual atau lewat env injection
+    // Untuk kemudahan, seed bisa juga dipanggil langsung dari URL browser
+    const CRON_SECRET = '' // kosongkan — user trigger seed via URL di browser
+
+    async function loadPredict() {
+      const body = document.getElementById('predict-body')
+      body.innerHTML = '<div class="text-center py-10 text-gray-500">Loading…</div>'
+      try {
+        const res  = await fetch('/api/predict')
+        const json = await res.json()
+        if (json.error) { body.innerHTML = `<p class="text-red-400">${json.error}</p>`; return }
+        renderPredict(json)
+      } catch (e) {
+        body.innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`
+      }
+    }
+
+    function renderPredict({ predictions, avgDelays, dataIsReal, total }) {
+      // Stats
+      document.getElementById('predict-stats').classList.remove('hidden')
+      document.getElementById('stat-avg-upbit').textContent   = avgDelays.upbit + ' hari' + (dataIsReal ? '' : '*')
+      document.getElementById('stat-avg-bithumb').textContent = avgDelays.bithumb + ' hari' + (dataIsReal ? '' : '*')
+      document.getElementById('stat-cand-upbit').textContent  = predictions.filter(p => p.scoreUpbit !== null).length
+      document.getElementById('stat-cand-bithumb').textContent = predictions.filter(p => p.scoreBithumb !== null).length
+
+      if (!predictions.length) {
+        document.getElementById('predict-body').innerHTML =
+          '<p class="text-gray-500 text-center py-10">Tidak ada kandidat ditemukan.</p>'
+        return
+      }
+
+      const scoreColor = (s) => {
+        if (s === null) return 'text-gray-600'
+        if (s >= 150) return 'text-red-400 font-bold'
+        if (s >= 100) return 'text-orange-400 font-bold'
+        if (s >= 50)  return 'text-yellow-400'
+        return 'text-gray-500'
+      }
+
+      const scoreBadge = (s, label) => {
+        if (s === null) return `<span class="text-xs text-green-500">✓ listed</span>`
+        const color = s >= 150 ? 'bg-red-900 text-red-300' : s >= 100 ? 'bg-orange-900 text-orange-300' : s >= 50 ? 'bg-yellow-900 text-yellow-300' : 'bg-gray-800 text-gray-400'
+        return `<span class="inline-block px-2 py-0.5 rounded text-xs font-medium ${color}">${s}%</span>`
+      }
+
+      document.getElementById('predict-body').innerHTML = `
+        ${!dataIsReal ? '<p class="text-xs text-yellow-500 mb-3">* Menggunakan estimasi default. Data akan akurat setelah seed + beberapa minggu tracking.</p>' : ''}
+        <div class="overflow-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="bg-gray-900 text-gray-400 text-xs uppercase tracking-wider">
+              <th class="text-left px-4 py-3">Coin</th>
+              <th class="text-center px-3 py-3">Di Binance sejak</th>
+              <th class="text-center px-3 py-3">Hari di Binance</th>
+              <th class="text-center px-3 py-3">Upbit Score</th>
+              <th class="text-center px-3 py-3">Bithumb Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${predictions.map(p => `
+              <tr class="border-t border-gray-800 hover:bg-gray-900 transition-colors">
+                <td class="px-4 py-2.5 font-mono font-bold text-white">${p.symbol}</td>
+                <td class="px-3 py-2.5 text-center text-xs text-gray-400">${p.binanceSince}</td>
+                <td class="px-3 py-2.5 text-center text-white font-medium">${p.daysOnBinance}</td>
+                <td class="px-3 py-2.5 text-center">${scoreBadge(p.scoreUpbit)}</td>
+                <td class="px-3 py-2.5 text-center">${scoreBadge(p.scoreBithumb)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        </div>
+        <p class="text-xs text-gray-600 mt-3">Score 100% = sudah melewati rata-rata waktu listing. Makin tinggi = makin overdue.</p>
+      `
     }
 
     // ── Alerts ───────────────────────────────────────────────────────────────
