@@ -1,0 +1,9 @@
+{
+  "name": "crypto-listing-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  }
+}

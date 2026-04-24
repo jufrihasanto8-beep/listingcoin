@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crypto Listing Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0f1117; }
+    .badge-yes { background: #052e16; color: #4ade80; }
+    .badge-no  { background: #2d0a0a; color: #f87171; }
+    th { position: sticky; top: 0; z-index: 10; }
+    #table-body tr:hover { background: #1e2030; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #1e2030; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+  </style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+  <!-- Header -->
+  <div class="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-bold text-white">Crypto Listing Tracker</h1>
+      <p class="text-xs text-gray-500 mt-0.5">Binance coins not yet listed on other exchanges</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="last-updated" class="text-xs text-gray-500"></span>
+      <button id="btn-refresh"
+        onclick="loadData(true)"
+        class="text-xs px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition">
+        ↻ Refresh
+      </button>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="px-6 py-3 border-b border-gray-800 flex flex-wrap gap-3 items-center">
+    <input id="search" type="text" placeholder="Search coin…"
+      oninput="applyFilters()"
+      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-40 focus:outline-none focus:border-blue-500" />
+
+    <select id="filter-exchange" onchange="applyFilters()"
+      class="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+      <option value="">All exchanges</option>
+    </select>
+
+    <label class="flex items-center gap-2 text-sm text-gray-400 cursor-pointer select-none">
+      <input id="only-missing" type="checkbox" onchange="applyFilters()"
+        class="w-4 h-4 accent-blue-500 cursor-pointer" />
+      Only show coins NOT listed on selected exchange
+    </label>
+
+    <span id="count-label" class="ml-auto text-xs text-gray-500"></span>
+  </div>
+
+  <!-- Table -->
+  <div class="overflow-auto" style="max-height: calc(100vh - 160px);">
+    <table class="w-full text-sm border-collapse">
+      <thead id="table-head" class="bg-gray-900 text-gray-400 text-xs uppercase tracking-wider">
+        <tr>
+          <th class="text-left px-4 py-3 font-semibold bg-gray-900 cursor-pointer" onclick="sortBy('symbol')">
+            Coin <span id="sort-symbol"></span>
+          </th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        <tr>
+          <td colspan="10" class="text-center py-20 text-gray-500">Loading…</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    let allCoins    = []
+    let exchanges   = []
+    let sortKey     = 'missing'
+    let sortDir     = -1  // -1 = desc, 1 = asc
+    let lastUpdated = null
+
+    const LABELS = {
+      upbit:   'Upbit',
+      bithumb: 'Bithumb',
+      okx:     'OKX',
+      bybit:   'Bybit',
+      kucoin:  'KuCoin',
+    }
+
+    // ── Load data ──────────────────────────────────────────────────────────
+
+    async function loadData(force = false) {
+      const btn = document.getElementById('btn-refresh')
+      btn.textContent = '↻ Loading…'
+      btn.disabled = true
+
+      try {
+        const url = force ? '/api/coins?bust=' + Date.now() : '/api/coins'
+        const res  = await fetch(url)
+        const json = await res.json()
+
+        if (json.error) { alert('Error: ' + json.error); return }
+
+        allCoins    = json.coins    ?? []
+        exchanges   = json.exchanges ?? []
+        lastUpdated = json.lastUpdated
+
+        buildHeader()
+        buildExchangeFilter()
+        applyFilters()
+        updateLastUpdated()
+      } catch (e) {
+        document.getElementById('table-body').innerHTML =
+          `<tr><td colspan="10" class="text-center py-20 text-red-400">Failed to load: ${e.message}</td></tr>`
+      } finally {
+        btn.textContent = '↻ Refresh'
+        btn.disabled = false
+      }
+    }
+
+    // ── Build header ──────────────────────────────────────────────────────
+
+    function buildHeader() {
+      const tr = document.querySelector('#table-head tr')
+      tr.innerHTML = `
+        <th class="text-left px-4 py-3 font-semibold bg-gray-900 cursor-pointer whitespace-nowrap" onclick="sortBy('symbol')">
+          Coin <span id="sort-symbol" class="text-blue-400"></span>
+        </th>
+        ${exchanges.map(ex => `
+          <th class="text-center px-3 py-3 font-semibold bg-gray-900 cursor-pointer whitespace-nowrap" onclick="sortBy('${ex}')">
+            ${LABELS[ex] ?? ex} <span id="sort-${ex}" class="text-blue-400"></span>
+          </th>
+        `).join('')}
+        <th class="text-center px-3 py-3 font-semibold bg-gray-900 cursor-pointer whitespace-nowrap" onclick="sortBy('missing')">
+          Missing <span id="sort-missing" class="text-blue-400">↓</span>
+        </th>
+      `
+    }
+
+    // ── Build exchange filter select ──────────────────────────────────────
+
+    function buildExchangeFilter() {
+      const sel = document.getElementById('filter-exchange')
+      sel.innerHTML = '<option value="">All exchanges</option>' +
+        exchanges.map(ex => `<option value="${ex}">${LABELS[ex] ?? ex}</option>`).join('')
+    }
+
+    // ── Filters & sort ────────────────────────────────────────────────────
+
+    function applyFilters() {
+      const search   = document.getElementById('search').value.trim().toUpperCase()
+      const filterEx = document.getElementById('filter-exchange').value
+      const onlyMiss = document.getElementById('only-missing').checked
+
+      let filtered = allCoins.filter(c => {
+        if (search && !c.symbol.includes(search)) return false
+        if (filterEx && onlyMiss && c[filterEx] === true) return false
+        return true
+      })
+
+      filtered = sortCoins(filtered)
+      renderTable(filtered)
+      document.getElementById('count-label').textContent =
+        `${filtered.length} / ${allCoins.length} coins`
+    }
+
+    function sortCoins(list) {
+      return [...list].sort((a, b) => {
+        let va = a[sortKey], vb = b[sortKey]
+        if (typeof va === 'boolean') { va = va ? 1 : 0; vb = vb ? 1 : 0 }
+        if (typeof va === 'string')  return sortDir * va.localeCompare(vb)
+        return sortDir * ((vb ?? 0) - (va ?? 0))
+      })
+    }
+
+    function sortBy(key) {
+      if (sortKey === key) sortDir *= -1
+      else { sortKey = key; sortDir = key === 'symbol' ? 1 : -1 }
+      updateSortIndicators()
+      applyFilters()
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('[id^="sort-"]').forEach(el => el.textContent = '')
+      const el = document.getElementById('sort-' + sortKey)
+      if (el) el.textContent = sortDir === 1 ? '↑' : '↓'
+    }
+
+    // ── Render table ──────────────────────────────────────────────────────
+
+    function renderTable(coins) {
+      const tbody = document.getElementById('table-body')
+      if (!coins.length) {
+        tbody.innerHTML = `<tr><td colspan="10" class="text-center py-20 text-gray-500">No coins match your filter.</td></tr>`
+        return
+      }
+
+      const filterEx = document.getElementById('filter-exchange').value
+
+      tbody.innerHTML = coins.map(c => `
+        <tr class="border-t border-gray-800 transition-colors">
+          <td class="px-4 py-2.5 font-mono font-semibold text-white">${c.symbol}</td>
+          ${exchanges.map(ex => {
+            const listed = c[ex]
+            const highlight = filterEx === ex && !listed
+            return `<td class="px-3 py-2.5 text-center">
+              <span class="inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                listed
+                  ? 'badge-yes'
+                  : highlight ? 'bg-red-900 text-red-300 ring-1 ring-red-500' : 'badge-no'
+              }">
+                ${listed ? '✓' : '✗'}
+              </span>
+            </td>`
+          }).join('')}
+          <td class="px-3 py-2.5 text-center">
+            <span class="inline-block px-2 py-0.5 rounded text-xs font-bold ${
+              c.missing === 0 ? 'text-gray-500' :
+              c.missing >= 4 ? 'bg-red-900 text-red-300' :
+              c.missing >= 2 ? 'bg-yellow-900 text-yellow-300' :
+                               'bg-blue-900 text-blue-300'
+            }">
+              ${c.missing}
+            </span>
+          </td>
+        </tr>
+      `).join('')
+    }
+
+    // ── Last updated ──────────────────────────────────────────────────────
+
+    function updateLastUpdated() {
+      const el = document.getElementById('last-updated')
+      if (!lastUpdated) { el.textContent = 'No data yet — click Refresh'; return }
+      const d = new Date(lastUpdated)
+      el.textContent = 'Updated ' + d.toLocaleString()
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────
+    loadData()
+  </script>
+</body>
+</html>
