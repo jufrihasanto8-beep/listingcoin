@@ -8,15 +8,31 @@ const supabase = createClient(
 // ── Exchange fetchers ────────────────────────────────────────────────────────
 
 async function fetchBinance() {
-  const res = await fetch('https://api.binance.com/api/v3/exchangeInfo')
-  const data = await res.json()
-  const coins = new Set()
-  for (const s of data.symbols) {
-    if (s.status === 'TRADING' && s.quoteAsset === 'USDT') {
-      coins.add(s.baseAsset.toUpperCase())
+  // Try multiple endpoints — Binance blocks some cloud provider IPs
+  const hosts = [
+    'https://api.binance.com',
+    'https://api1.binance.com',
+    'https://api2.binance.com',
+    'https://api3.binance.com',
+    'https://api4.binance.com',
+  ]
+  for (const host of hosts) {
+    try {
+      const res  = await fetch(`${host}/api/v3/exchangeInfo`, { signal: AbortSignal.timeout(10000) })
+      if (!res.ok) continue
+      const data = await res.json()
+      const coins = new Set()
+      for (const s of data.symbols) {
+        if (s.status === 'TRADING' && s.quoteAsset === 'USDT') {
+          coins.add(s.baseAsset.toUpperCase())
+        }
+      }
+      if (coins.size > 0) return [...coins]
+    } catch (e) {
+      console.error(`Binance ${host} failed:`, e.message)
     }
   }
-  return [...coins]
+  return []
 }
 
 async function fetchUpbit() {
@@ -53,11 +69,19 @@ async function fetchOKX() {
 }
 
 async function fetchBybit() {
-  const res = await fetch('https://api.bybit.com/v5/market/instruments-info?category=spot&limit=1000')
-  const data = await res.json()
-  const coins = new Set()
-  for (const inst of data.result?.list ?? []) {
-    coins.add(inst.baseCoin.toUpperCase())
+  // Bybit paginates — loop until no nextPageCursor
+  const coins  = new Set()
+  let cursor   = ''
+  let attempts = 0
+  while (attempts++ < 10) {
+    const url = `https://api.bybit.com/v5/market/instruments-info?category=spot&limit=500${cursor ? '&cursor=' + cursor : ''}`
+    const res  = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    const data = await res.json()
+    for (const inst of data.result?.list ?? []) {
+      coins.add(inst.baseCoin.toUpperCase())
+    }
+    cursor = data.result?.nextPageCursor ?? ''
+    if (!cursor) break
   }
   return [...coins]
 }
